@@ -28,10 +28,16 @@ sudo mv ./remote_observe /usr/local/bin
 
 ## Notes
 
+- [Releases with Runtime tools](#releases-with-runtime-tools)
 - [Compatible VM](#compatible-vm)
 - [Access to the Cookie](#access-to-the-cookie)
-- [Elixir / Erlang](#elixir-/-erlang)
+- [Short and long names](#short-and-long-names)
 - [EPMD Port](#epmd-port)
+- [MacOS](#macos)
+- [Elixir / Erlang](#elixir-/-erlang)
+
+### Releases with Runtime tools
+In order to run the observer tool locally, observing the remote as in the demo your release needs to include the runtime tools. You can [read more about this here](https://tkowal.wordpress.com/2016/04/23/observer-in-erlangelixir-release/) and about [enabling distribution in releases here](https://elixirforum.com/t/remote-observer-connection-issues/26315/3)
 
 ### Compatible VM
 You need to have a local installed Elixir VM that is compatible with the remote Elixir VM that you have 
@@ -45,10 +51,15 @@ To connect to a remote VM `remote_observe` tries to determine the secret cookie.
 
 Example: `COOKIE=secret remote_observer myserver.com`
 
+### Short and long names
+Currently the script is only using `-sname`, should be an option or better automatically detected. __TODO__ 
+
+### EPMD Port
+The default epmd port is 4369. Unfortunately the remote epmd port and locally mapped epmd port need to be identical. So in the default setup `remote_observe` will kill any locally running epmd service before creating the SSH tunnel, so that the Elixir/Erlang remote shell is opened against the remote node and not locally.
+
+### MacOS
+Haven't tested there. 
 
 ### Elixir / Erlang
 If you're not an Elixir user you can just comment in the bash script the iex line and instead uncomment the erl line. Pull request to make this configurable are welcome 
 
-### EPMD Port
-The default epmd port is 4369. Unfortunately the remote epmd port and locally mapped epmd port need to be identical. So in the default setup `remote_observe` will kill any locally running epmd service before creating the SSH tunnel, so that the Elixir/Erlang remote shell is opened against the remote node and not locally.
-This 
