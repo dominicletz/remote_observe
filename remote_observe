@@ -1,19 +1,58 @@
 #!/bin/bash
-if [[ "$1" == "" ]]; then
-    echo "Usage: remote_observe <ssh_server_url> (<node_name>)"
+function show_help
+{
+    echo "Usage: remote_observe <ssh_server_url> (-options) (<node_name>)"
     echo ""
-    echo "    <name_name> is only required if there is more than one node"
-    echo "                running on the remote machine."
+    echo "  <name_name> is only required if there is more than one node"
+    echo "              running on the remote machine."
     echo ""
-    echo "       (COOKIE_PATH=<path>) remote_observe <ssh_server_url> (<node_name>)"
-    echo "       (COOKIE_HOME=<home>) remote_observe <ssh_server_url> (<node_name>)"
-    echo "       (COOKIE=<cookie>) remote_observe <ssh_server_url> (<node_name>)"
+    echo "Options:"
+    echo ""
+    echo "  -e                Start an erlang shell instead of an elixir shell"
+    echo "  -l                Use long names instead of default short names"
+    echo "  -c <cookie>       Set the cookie value"
+    echo "  -h <cookie_home>  Looks for the cookie in <cookie_home>/.erlang.cookie"
+    echo "                    on the remote node"
+    echo "  -p <cookie_path>  Looks for the cookie in <cookie_path> on the remote"
+    echo "                    node"
     echo ""
     echo "Example:"
-    echo "  COOKIE=SECRET remote_observe dev.myserver.com"
+    echo "  remote_observe -c secret dev.myserver.com"
+    echo "  remote_observe -p /opt/app/releases/COOKIE dev.myserver.com"
     echo ""
     exit
+}
+
+if [[ "$1" == "" ]]; then
+  show_help
 fi
+
+OPTIND=1
+use_erlang=0
+name=sname
+
+while getopts "?elc:p:h:" opt; do
+    case "$opt" in
+    \?)
+        show_help
+        exit 0
+        ;;
+    e)  use_erlang=1
+        ;;
+    l)  name=name
+        ;;
+    c)  COOKIE=$OPTARG
+        ;;
+    p)  COOKIE_PATH=$OPTARG
+        ;;
+    h)  COOKIE_HOME=$OPTARG
+        ;;
+    esac
+done
+
+shift $((OPTIND-1))
+
+[ "${1:-}" = "--" ] && shift
 
 ## Piping EPMD
 if [[ "$ERL_EPMD_PORT" == "" ]]; then
@@ -31,7 +70,7 @@ function cleanup
 {
   echo $1
   ## Closing background ssl tunnel and cleanin up
-  ssh -T -S $tmp_dir/socket -O "exit" $1
+  ssh -T -S $tmp_dir/socket -O "exit" $1 2> /dev/null
   rm $tmp_dir/erl_inetrc 2> /dev/null
   rmdir $tmp_dir
   exit
@@ -77,7 +116,7 @@ if [[ "$COOKIE" == "" ]]; then
     fi
     COOKIE_PATH="$COOKIE_HOME/.erlang.cookie"
   fi
-  echo "Connecting to find erlang cookie in $1:$COOKIE_PATH"
+  echo "Trying to load erlang cookie from $1:$COOKIE_PATH"
   COOKIE=$($remote_do "cat $COOKIE_PATH")
 fi
 echo "Cookie: ${COOKIE:0:3}*****************"
@@ -99,7 +138,10 @@ echo "{edns,0}." >> $ERL_INETRC
 echo "{lookup, [file, dns]}." >> $ERL_INETRC
 
 ## Starting up beam
-#~ iex --hidden --cookie "$COOKIE" --sname "remsh_$$@$host" --remsh "$node@$host" --eval ":observer.start()"
-erl -remsh "$node@$host" -hidden -setcookie "$COOKIE" -sname "remsh_$$@$host" -eval "observer:start()." 
+if [[ "$use_erlang" == 1 ]]; then
+  erl -remsh "$node@$host" -hidden -setcookie "$COOKIE" "-$name" "remsh_$$@$host" -eval "observer:start()." 
+else
+  iex --hidden --cookie "$COOKIE" "--$name" "remsh_$$@$host" --remsh "$node@$host" --eval ":observer.start()"
+fi
 
 cleanup "Done"
