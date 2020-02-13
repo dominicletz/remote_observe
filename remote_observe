@@ -1,28 +1,18 @@
 #!/bin/bash
 if [[ "$1" == "" ]]; then
     echo "Usage: remote_observe <ssh_server_url> (<node_name>)"
+    echo ""
+    echo "    <name_name> is only required if there is more than one node"
+    echo "                running on the remote machine."
+    echo ""
+    echo "       (COOKIE_PATH=<path>) remote_observe <ssh_server_url> (<node_name>)"
+    echo "       (COOKIE_HOME=<home>) remote_observe <ssh_server_url> (<node_name>)"
+    echo "       (COOKIE=<cookie>) remote_observe <ssh_server_url> (<node_name>)"
+    echo ""
+    echo "Example:"
+    echo "  COOKIE=SECRET remote_observe dev.myserver.com"
+    echo ""
     exit
-fi
-
-echo "Connecting to find epmd ports"
-out=$(ssh $1 'hostname && epmd -names')
-host=$(echo "$out" | head -n 1)
-ports=$(echo "$out" | tail -n +3 | cut -d' ' -f 5)
-names=$(echo "$out" | tail -n +3 | cut -d' ' -f 2)
-
-## Detecting the secret distribution cookie
-if [[ "$COOKIE" == "" ]]; then
-  if [[ "$COOKIE_HOME" == "" ]]; then
-    COOKIE_HOME="~"
-  fi
-  echo "Connecting to find erlang cookie in $1:$COOKIE_HOME/.erlang.cookie"
-  COOKIE=$(ssh $1 "cat $COOKIE_HOME/.erlang.cookie")
-fi
-echo "Cookie: ${COOKIE:0:3}*****************"
-
-if [[ "$COOKIE" == "" ]]; then
-  echo "Could not determine the cookie"
-  exit
 fi
 
 ## Piping EPMD
@@ -33,33 +23,74 @@ if [[ "$ERL_EPMD_PORT" == "" ]]; then
 fi
 echo "Epmd: $ERL_EPMD_PORT"
 
+echo "Connecting..."
+
+## Tmp dir for socket and config
+tmp_dir=$(mktemp -d)
+function cleanup
+{
+  echo $1
+  ## Closing background ssl tunnel and cleanin up
+  ssh -T -S $tmp_dir/socket -O "exit" $1
+  rm $tmp_dir/erl_inetrc 2> /dev/null
+  rmdir $tmp_dir
+  exit
+}
+
 # Unfortunately we can't remap epmd to a different port or we get {error, address}
 # Check erl_epmd:do_get_names/1 implementation
 opts="$opts -L $ERL_EPMD_PORT:localhost:$ERL_EPMD_PORT"
 
-## Creating Port mappings for each remote beam
-for port in $ports; do
-   opts="$opts -L $port:localhost:$port"
-done
-echo "Opts: $opts"
-echo "Host: $host"
+## Creating background ssh tunnel with socket mappings
+ssh -f -N -T -M -S $tmp_dir/socket $opts $1 || cleanup "Couldn't connect"
+remote_do="ssh -S $tmp_dir/socket nil"
 
+epmd=$(epmd -names) || cleanup "Couldn't run epmd"
+
+# Ports
+ports=$(echo "$epmd" | tail -n +2 | cut -d' ' -f 5)
+
+# Finding the node name
+names=$(echo "$epmd" | tail -n +2 | cut -d' ' -f 2)
 # If there is more than one remote beam, we need to know which one to connect to
 len=$(echo "$names" | wc -w)
-if [[ "$len" == "1" ]]; then
+if [[ "$len" == "0" ]]; then
+  cleanup "Did not find any remote beams"
+elif [[ "$len" == "1" ]]; then
   node="$names"
 elif [[ "$2" != "" ]]; then
   node="$2"
 else
   echo "Identified multiple remote beams:"
-  echo "$names"
-  exit
+  cleanup "$names"
 fi
-
 echo "Node: $node"
 
-## Tmp dir for socket and config
-tmp_dir=$(mktemp -d)
+host=$($remote_do hostname)
+echo "Host: $host"
+
+## Detecting the secret distribution cookie
+if [[ "$COOKIE" == "" ]]; then
+  if [[ "$COOKIE_PATH" == "" ]]; then
+    if [[ "$COOKIE_HOME" == "" ]]; then
+      COOKIE_HOME="~"
+    fi
+    COOKIE_PATH="$COOKIE_HOME/.erlang.cookie"
+  fi
+  echo "Connecting to find erlang cookie in $1:$COOKIE_PATH"
+  COOKIE=$($remote_do "cat $COOKIE_PATH")
+fi
+echo "Cookie: ${COOKIE:0:3}*****************"
+
+if [[ "$COOKIE" == "" ]]; then
+  cleanup "Could not determine the cookie"
+fi
+
+## Creating Port mappings for each remote beam
+for port in $ports; do
+  echo "Port: $port"
+   $($remote_do -O forward -L $port:localhost:$port)
+done
 
 ## Overriding hostname lookup to convince local beam that it's running remote
 export ERL_INETRC=$tmp_dir/erl_inetrc
@@ -67,14 +98,8 @@ echo "{host, {127,0,0,1}, [\"$host\", \"$node@$host\"]}." > $ERL_INETRC
 echo "{edns,0}." >> $ERL_INETRC
 echo "{lookup, [file, dns]}." >> $ERL_INETRC
 
-## Creating background ssh tunnel with socket mappings
-ssh -f -N -T -M -S $tmp_dir/socket $opts $1
-
 ## Starting up beam
 #~ iex --hidden --cookie "$COOKIE" --sname "remsh_$$@$host" --remsh "$node@$host" --eval ":observer.start()"
 erl -remsh "$node@$host" -hidden -setcookie "$COOKIE" -sname "remsh_$$@$host" -eval "observer:start()." 
 
-## Closing background ssl tunnel and cleanin up
-ssh -T -S $tmp_dir/socket -O "exit" $1
-rm $tmp_dir/erl_inetrc
-rmdir $tmp_dir
+cleanup "Done"
