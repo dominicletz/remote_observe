@@ -23,9 +23,9 @@ You only have to ensure that in your mix.exs you've added the runtime_tools in y
 ## SYNOPSIS
 
 ```
-Usage: remote_observe <ssh_server_url> (-options) (<node_name>)
+Usage: remote_observe (-options) <ssh_server_url> (<node_name>)
 
-  <name_name> is only required if there is more than one node
+  <node_name> is only required if there is more than one node
               running on the remote machine.
 
 Options:

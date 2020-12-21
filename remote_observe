@@ -1,7 +1,7 @@
 #!/bin/bash
 function show_help
 {
-    echo "Usage: remote_observe <ssh_server_url> (-options) (<node_name>)"
+    echo "Usage: remote_observe (-options) <ssh_server_url> (<node_name>)"
     echo ""
     echo "  <name_name> is only required if there is more than one node"
     echo "              running on the remote machine."
@@ -138,7 +138,7 @@ echo "{edns,0}." >> $ERL_INETRC
 echo "{lookup, [file, dns]}." >> $ERL_INETRC
 
 ## Starting up beam
-if [[ "$use_erlang" == 1 ]]; then
+if [[ $use_erlang == 1 ]]; then
   erl -remsh "$node@$host" -hidden -setcookie "$COOKIE" "-$name" "remsh_$$@$host" -eval "observer:start()." 
 else
   iex --hidden --cookie "$COOKIE" "--$name" "remsh_$$@$host" --remsh "$node@$host" --eval ":observer.start()"
